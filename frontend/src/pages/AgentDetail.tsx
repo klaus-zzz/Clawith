@@ -913,12 +913,16 @@ export default function AgentDetail() {
             const res = await scheduleApi.trigger(id!, sid);
             return res;
         },
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['schedules', id] }),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['schedules', id] });
+            showToast('✅ Schedule triggered — executing in background', 'success');
+        },
         onError: (err: any) => {
             const msg = err?.response?.data?.detail || err?.message || 'Failed to trigger schedule';
             showToast(msg, 'error');
         },
     });
+
 
     const { data: metrics } = useQuery({
         queryKey: ['metrics', id],
@@ -1061,6 +1065,14 @@ export default function AgentDetail() {
         queryFn: () => taskApi.getLogs(id!, selectedTaskId!),
         enabled: !!id && !!selectedTaskId,
         refetchInterval: selectedTaskId ? 3000 : false,
+    });
+
+    // Schedule execution history (selectedTaskId format: 'sched-{uuid}')
+    const expandedScheduleId = selectedTaskId?.startsWith('sched-') ? selectedTaskId.slice(6) : null;
+    const { data: scheduleHistoryData } = useQuery({
+        queryKey: ['schedule-history', id, expandedScheduleId],
+        queryFn: () => scheduleApi.history(id!, expandedScheduleId!),
+        enabled: !!id && !!expandedScheduleId,
     });
     const createTask = useMutation({
         mutationFn: (data: any) => {
@@ -1587,10 +1599,11 @@ export default function AgentDetail() {
                                                     <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '6px', padding: '2px 0' }}>Scheduled</div>
                                                     {schedules.length > 0 ? schedules.map((s: any) => {
                                                         const formatDt = (iso: string) => !iso ? '-' : new Date(iso).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                                                        const isExpanded = selectedTaskId === `sched-${s.id}`;
                                                         return (
                                                             <div key={s.id} className="card" style={{ marginBottom: '6px', padding: '10px 12px', borderLeft: `3px solid ${s.is_enabled ? 'var(--accent-primary)' : 'var(--text-tertiary)'}`, opacity: s.is_enabled ? 1 : 0.6 }}>
                                                                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                                                                    <span style={{ fontSize: '13px' }}>{s.is_enabled ? '⏰' : '⏸️'}</span>
+                                                                    <span style={{ fontSize: '13px' }}>{s.is_enabled ? '⏰' : '⏸'}</span>
                                                                     <span style={{ fontWeight: 500, fontSize: '12px', flex: 1 }}>{s.name}</span>
                                                                     {s.creator_username && <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', background: 'var(--bg-tertiary)', borderRadius: '4px', padding: '1px 5px' }}>@{s.creator_username}</span>}
                                                                 </div>
@@ -1605,14 +1618,42 @@ export default function AgentDetail() {
                                                                     {s.run_count > 0 && <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>· {s.run_count}x</span>}
                                                                     {s.last_run_at && <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>Last: {formatDt(s.last_run_at)}</span>}
                                                                 </div>
-                                                                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-                                                                    <button className="btn btn-ghost" title={t('agent.tasks.triggerNow', 'Trigger Now')} style={{ fontSize: '12px', padding: '2px 6px', lineHeight: 1 }}
-                                                                        onClick={() => triggerScheduleMut.mutate(s.id)}>▶️</button>
-                                                                    <button className="btn btn-ghost" title={s.is_enabled ? t('common.pause', 'Pause') : t('common.resume', 'Resume')} style={{ fontSize: '12px', padding: '2px 6px', lineHeight: 1 }}
-                                                                        onClick={() => toggleScheduleMut.mutate({ sid: s.id, enabled: !s.is_enabled })}>{s.is_enabled ? '⏸️' : '▶️'}</button>
-                                                                    <button className="btn btn-ghost" title={t('common.delete')} style={{ fontSize: '12px', padding: '2px 6px', lineHeight: 1, color: 'var(--error)' }}
-                                                                        onClick={() => { if (confirm(`Delete ${s.name}?`)) deleteScheduleMut.mutate(s.id); }}>🗑️</button>
+                                                                <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+                                                                    <button className="btn btn-ghost" title={t('agent.tasks.triggerNow', 'Run Now')} style={{ padding: '3px 5px', lineHeight: 1 }}
+                                                                        onClick={() => triggerScheduleMut.mutate(s.id)}>
+                                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                                                                    </button>
+                                                                    <button className="btn btn-ghost" title={s.is_enabled ? t('common.pause', 'Pause') : t('common.resume', 'Resume')} style={{ padding: '3px 5px', lineHeight: 1 }}
+                                                                        onClick={() => toggleScheduleMut.mutate({ sid: s.id, enabled: !s.is_enabled })}>
+                                                                        {s.is_enabled
+                                                                            ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>
+                                                                            : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>}
+                                                                    </button>
+                                                                    <button className="btn btn-ghost" title={t('common.delete')} style={{ padding: '3px 5px', lineHeight: 1, color: 'var(--error)' }}
+                                                                        onClick={() => { if (confirm(`Delete ${s.name}?`)) deleteScheduleMut.mutate(s.id); }}>
+                                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>
+                                                                    </button>
+                                                                    <div style={{ flex: 1 }} />
+                                                                    <button className="btn btn-ghost" title="History" style={{ padding: '3px 5px', lineHeight: 1, fontSize: '10px', color: 'var(--text-tertiary)' }}
+                                                                        onClick={() => setSelectedTaskId(isExpanded ? null : `sched-${s.id}`)}>
+                                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+                                                                    </button>
                                                                 </div>
+                                                                {isExpanded && (
+                                                                    <div style={{ marginTop: '8px', borderTop: '1px solid var(--border-subtle)', paddingTop: '8px' }}>
+                                                                        <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '6px' }}>Execution History</div>
+                                                                        {scheduleHistoryData && scheduleHistoryData.length > 0 ? scheduleHistoryData.map((h: any) => (
+                                                                            <div key={h.id} style={{ marginBottom: '8px', padding: '6px 8px', background: 'var(--bg-tertiary)', borderRadius: '6px' }}>
+                                                                                <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginBottom: '3px' }}>
+                                                                                    {new Date(h.created_at).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                                                </div>
+                                                                                <div style={{ fontSize: '11px', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: 1.4, maxHeight: '120px', overflow: 'auto' }}>
+                                                                                    {h.reply || h.summary || 'No result recorded'}
+                                                                                </div>
+                                                                            </div>
+                                                                        )) : <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>No execution history yet</div>}
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         );
                                                     }) : <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', padding: '8px', textAlign: 'center' }}>No schedules</div>}
@@ -1651,19 +1692,31 @@ export default function AgentDetail() {
                                                 </div>
                                                 {/* Supervision action buttons */}
                                                 {task.type === 'supervision' && task.status !== 'done' && (
-                                                    <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }} onClick={e => e.stopPropagation()}>
-                                                        <button className="btn btn-ghost" title={t('agent.tasks.triggerNow', 'Trigger Now')} style={{ fontSize: '12px', padding: '2px 6px', lineHeight: 1 }}
+                                                    <div style={{ display: 'flex', gap: '2px', marginTop: '6px' }} onClick={e => e.stopPropagation()}>
+                                                        <button className="btn btn-ghost" title={t('agent.tasks.triggerNow', 'Run Now')} style={{ padding: '3px 5px', lineHeight: 1 }}
                                                             onClick={async () => {
-                                                                const token = localStorage.getItem('token');
-                                                                await fetch(`/api/agents/${id}/tasks/${task.id}/trigger`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+                                                                await taskApi.trigger(id!, task.id);
                                                                 queryClient.invalidateQueries({ queryKey: ['tasks', id] });
-                                                            }}>▶️</button>
-                                                        <button className="btn btn-ghost" title={task.status === 'paused' ? t('common.resume', 'Resume') : t('common.pause', 'Pause')} style={{ fontSize: '12px', padding: '2px 6px', lineHeight: 1 }}
+                                                                showToast('✅ Task triggered', 'success');
+                                                            }}>
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                                                        </button>
+                                                        <button className="btn btn-ghost" title={task.status === 'paused' ? t('common.resume', 'Resume') : t('common.pause', 'Pause')} style={{ padding: '3px 5px', lineHeight: 1 }}
                                                             onClick={async () => {
-                                                                const token = localStorage.getItem('token');
-                                                                await fetch(`/api/agents/${id}/tasks/${task.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ status: task.status === 'paused' ? 'pending' : 'paused' }) });
+                                                                await taskApi.update(id!, task.id, { status: task.status === 'paused' ? 'pending' : 'paused' } as any);
                                                                 queryClient.invalidateQueries({ queryKey: ['tasks', id] });
-                                                            }}>{task.status === 'paused' ? '▶️' : '⏸️'}</button>
+                                                            }}>
+                                                            {task.status === 'paused'
+                                                                ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                                                                : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></svg>}
+                                                        </button>
+                                                        <button className="btn btn-ghost" title={t('agent.tasks.markDone', 'Mark Done')} style={{ padding: '3px 5px', lineHeight: 1, color: 'var(--success)' }}
+                                                            onClick={async () => {
+                                                                await taskApi.update(id!, task.id, { status: 'done' } as any);
+                                                                queryClient.invalidateQueries({ queryKey: ['tasks', id] });
+                                                            }}>
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+                                                        </button>
                                                     </div>
                                                 )}
                                                 {selectedTaskId === task.id && taskLogs.length > 0 && (

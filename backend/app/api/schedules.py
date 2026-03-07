@@ -205,29 +205,31 @@ async def get_schedule_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get execution history for a schedule from audit logs."""
+    """Get execution history for a schedule from activity logs."""
     await check_agent_access(db, current_user, agent_id)
-    from app.models.audit import AuditLog
+    from app.models.activity_log import AgentActivityLog
     result = await db.execute(
-        select(AuditLog)
+        select(AgentActivityLog)
         .where(
-            AuditLog.agent_id == agent_id,
-            AuditLog.action.in_(["schedule_fire", "schedule_run"]),
+            AgentActivityLog.agent_id == agent_id,
+            AgentActivityLog.action_type == "schedule_run",
         )
-        .order_by(AuditLog.created_at.desc())
+        .order_by(AgentActivityLog.created_at.desc())
     )
     logs = result.scalars().all()
-    # Filter by schedule_id in details JSON
+    # Filter by schedule_id in detail_json
     history = []
     for log in logs:
-        detail = log.details or {}
+        detail = log.detail_json or {}
         if detail.get("schedule_id") == str(schedule_id):
             history.append({
                 "id": str(log.id),
-                "action": log.action,
                 "created_at": log.created_at.isoformat() if log.created_at else None,
-                "detail": detail,
+                "summary": log.summary,
+                "instruction": detail.get("instruction", ""),
+                "reply": detail.get("reply", ""),
             })
         if len(history) >= 20:
             break
     return history
+

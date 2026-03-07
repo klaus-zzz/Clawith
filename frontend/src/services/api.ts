@@ -111,6 +111,9 @@ export const taskApi = {
 
     getLogs: (agentId: string, taskId: string) =>
         request<{ id: string; task_id: string; content: string; created_at: string }[]>(`/agents/${agentId}/tasks/${taskId}/logs`),
+
+    trigger: (agentId: string, taskId: string) =>
+        request<any>(`/agents/${agentId}/tasks/${taskId}/trigger`, { method: 'POST' }),
 };
 
 // ─── Files ────────────────────────────────────────────
@@ -224,6 +227,9 @@ export const scheduleApi = {
 
     trigger: (agentId: string, scheduleId: string) =>
         request<any>(`/agents/${agentId}/schedules/${scheduleId}/run`, { method: 'POST' }),
+
+    history: (agentId: string, scheduleId: string) =>
+        request<any[]>(`/agents/${agentId}/schedules/${scheduleId}/history`),
 };
 
 // ─── Skills ───────────────────────────────────────────
