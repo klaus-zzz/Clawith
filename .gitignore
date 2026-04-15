@@ -8,7 +8,6 @@ __pycache__/
 .env
 .venv/
 .vscode/
-.claude/
 .superset/
 venv/
 *.egg-info/
