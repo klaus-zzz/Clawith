@@ -102,36 +102,59 @@ asyncio.run(main())
 PYEOF
 
 echo "[entrypoint] Step 2: Running alembic migrations..."
-# Run all migrations to ensure database schema is up to date.
-# Capture exit code explicitly — do NOT let a migration failure go unnoticed.
+# Check if alembic has ever been run on this database.
+# If alembic_version table is empty, this is a fresh install — create_all already
+# built the full schema, so we just stamp to the latest revision and skip migrations.
 set +e
-ALEMBIC_OUTPUT=$(alembic upgrade head 2>&1)
-ALEMBIC_EXIT=$?
+CURRENT_REV=$(python -c "
+from sqlalchemy import create_engine, text
+import os
+url = os.environ['DATABASE_URL'].replace('+asyncpg', '')
+eng = create_engine(url)
+with eng.connect() as c:
+    try:
+        r = c.execute(text('SELECT version_num FROM alembic_version LIMIT 1')).fetchone()
+        print(r[0] if r else '')
+    except Exception:
+        print('')
+" 2>/dev/null)
 set -e
 
-if [ $ALEMBIC_EXIT -ne 0 ]; then
-    echo ""
-    echo "========================================================================"
-    echo "[entrypoint] WARNING: Alembic migration FAILED (exit code $ALEMBIC_EXIT)"
-    echo "========================================================================"
-    echo ""
-    echo "$ALEMBIC_OUTPUT"
-    echo ""
-    echo "------------------------------------------------------------------------"
-    echo "  The database schema may be INCOMPLETE. Some features will NOT work."
-    echo "  Common causes:"
-    echo "    - Migration cycle detected (pull latest code to fix)"
-    echo "    - Database connection issue"
-    echo "    - Incompatible migration state"
-    echo ""
-    echo "  To fix: pull the latest code and restart the backend."
-    echo "    Docker:  git pull && docker compose restart backend"
-    echo "    Source:  git pull && alembic upgrade head"
-    echo "------------------------------------------------------------------------"
-    echo ""
-    echo "[entrypoint] Continuing startup despite migration failure..."
+if [ -z "$CURRENT_REV" ]; then
+    echo "[entrypoint] Fresh install detected — stamping alembic to head (skipping migrations)."
+    alembic stamp head
+    echo "[entrypoint] Alembic stamped to head."
 else
-    echo "[entrypoint] Alembic migrations completed successfully."
+    echo "[entrypoint] Existing database (revision: $CURRENT_REV) — running migrations..."
+    set +e
+    ALEMBIC_OUTPUT=$(alembic upgrade head 2>&1)
+    ALEMBIC_EXIT=$?
+    set -e
+
+    if [ $ALEMBIC_EXIT -ne 0 ]; then
+        echo ""
+        echo "========================================================================"
+        echo "[entrypoint] WARNING: Alembic migration FAILED (exit code $ALEMBIC_EXIT)"
+        echo "========================================================================"
+        echo ""
+        echo "$ALEMBIC_OUTPUT"
+        echo ""
+        echo "------------------------------------------------------------------------"
+        echo "  The database schema may be INCOMPLETE. Some features will NOT work."
+        echo "  Common causes:"
+        echo "    - Migration cycle detected (pull latest code to fix)"
+        echo "    - Database connection issue"
+        echo "    - Incompatible migration state"
+        echo ""
+        echo "  To fix: pull the latest code and restart the backend."
+        echo "    Docker:  git pull && docker compose restart backend"
+        echo "    Source:  git pull && alembic upgrade head"
+        echo "------------------------------------------------------------------------"
+        echo ""
+        echo "[entrypoint] Continuing startup despite migration failure..."
+    else
+        echo "[entrypoint] Alembic migrations completed successfully."
+    fi
 fi
 
 echo "[entrypoint] Step 3: Starting uvicorn..."

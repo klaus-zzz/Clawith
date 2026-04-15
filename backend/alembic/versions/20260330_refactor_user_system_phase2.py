@@ -62,12 +62,20 @@ def upgrade() -> None:
  
     # 5. Data migration (idempotent)
     # Only migrate users that don't have an identity_id yet
-    result = conn.execute(sa.text("""
-        SELECT id, email, primary_mobile, username, password_hash, email_verified, is_active, role 
-        FROM users 
-        WHERE identity_id IS NULL
-    """))
-    users_data = result.fetchall()
+    # On fresh installs, users table already has the new schema (no email/username columns),
+    # so we must check before attempting the migration query.
+    user_columns = [c['name'] for c in inspect(conn).get_columns('users')]
+    has_legacy_columns = 'email' in user_columns and 'username' in user_columns
+
+    if has_legacy_columns:
+        result = conn.execute(sa.text("""
+            SELECT id, email, primary_mobile, username, password_hash, email_verified, is_active, role
+            FROM users
+            WHERE identity_id IS NULL
+        """))
+        users_data = result.fetchall()
+    else:
+        users_data = []
     
     if users_data:
         # Load existing identities to match against
@@ -119,11 +127,7 @@ def upgrade() -> None:
                 "user_id": u_id
             })
  
-    # 6. Cleanup: Make username/email nullable and DROP redundant columns
-    op.alter_column('users', 'username', existing_type=sa.String(length=100), nullable=True)
-    op.alter_column('users', 'email', existing_type=sa.String(length=255), nullable=True)
-
-    # Physically drop redundant columns
+    # 6. Cleanup: DROP redundant columns (only if they still exist)
     op.execute("ALTER TABLE users DROP COLUMN IF EXISTS username")
     op.execute("ALTER TABLE users DROP COLUMN IF EXISTS email")
     op.execute("ALTER TABLE users DROP COLUMN IF EXISTS password_hash")
