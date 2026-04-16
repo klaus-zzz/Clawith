@@ -451,11 +451,19 @@ async def call_llm(
             sig = f"{tc['function']['name']}:{tc['function'].get('arguments', '')}"
             _tool_call_history.append(sig)
 
-        if len(_tool_call_history) >= 6:
+        if len(_tool_call_history) >= 4:
             from collections import Counter
-            recent = _tool_call_history[-6:]
+            recent = _tool_call_history[-6:] if len(_tool_call_history) >= 6 else _tool_call_history
             counts = Counter(recent)
-            if any(c >= 3 for c in counts.values()):
+            # Detect: same signature 3+ times, OR only 2 unique signatures
+            # alternating (A-B-A-B pattern) with 4+ total calls
+            is_single_repeat = any(c >= 3 for c in counts.values())
+            is_alternating = (
+                len(counts) == 2
+                and len(recent) >= 4
+                and all(c >= 2 for c in counts.values())
+            )
+            if is_single_repeat or is_alternating:
                 if _loop_warning_injected:
                     # Already warned but LLM keeps looping — force break
                     logger.warning(

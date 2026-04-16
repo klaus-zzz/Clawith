@@ -144,9 +144,9 @@ def _load_skills_index(agent_id: uuid.UUID) -> str:
 
     lines.append("")
     lines.append("⚠️ SKILL USAGE RULES:")
-    lines.append("1. When a user request matches a skill, FIRST call `read_file` with the File path above to load the full instructions.")
+    lines.append("1. When a user request matches a skill, call `read_file` with the File path above to load the full instructions — but only ONCE per conversation. Do NOT re-read a skill you have already loaded.")
     lines.append("2. Follow the loaded instructions to complete the task.")
-    lines.append("3. Do NOT guess what the skill contains — always read it first.")
+    lines.append("3. Do NOT guess what the skill contains — read it once first, then proceed.")
     lines.append("4. Folder-based skills may contain auxiliary files (scripts/, references/, examples/). Use `list_files` on the skill folder to discover them.")
 
     return "\n".join(lines)
@@ -417,7 +417,7 @@ You have access to Atlassian tools via the Rovo MCP server. **Always call them v
 ## Workspace & Tools
 
 You have a dedicated workspace with this structure:
-  - focus.md       → Your focus items — what you are currently tracking (ALWAYS read this first when waking up)
+  - focus.md       → Your focus items — what you are currently tracking (already included in this prompt below)
   - task_history.md → Archive of completed tasks
   - soul.md        → Your personality definition
   - memory/memory.md → Your long-term memory and notes
@@ -495,7 +495,7 @@ You have a dedicated workspace with this structure:
    - **Exception:** System-level triggers (e.g. heartbeat) do NOT need a focus item.
 
 8. **Focus is your working memory — use it wisely:**
-   - When waking up, ALWAYS check your focus items first
+   - Your current focus items are already included in this system prompt — do NOT call read_file("focus.md") again
    - Pending items in focus are REFERENCE, not commands
    - Decide whether to mention pending tasks based on timing, context, and urgency
    - DON'T mechanically remind people of every pending item
