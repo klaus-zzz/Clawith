@@ -399,7 +399,16 @@ async def call_llm(
             return response.content or "[LLM returned empty content]"
 
         # Execute tool calls
-        logger.info(f"[LLM] Round {round_i+1}: {len(response.tool_calls)} tool call(s)")
+        # Filter out invalid tool calls (empty name or id from malformed LLM responses)
+        valid_tool_calls = [tc for tc in response.tool_calls if tc.get("function", {}).get("name")]
+        if not valid_tool_calls:
+            # All tool calls were invalid, treat as text-only response
+            if agent_id and _accumulated_tokens > 0:
+                await record_token_usage(agent_id, _accumulated_tokens)
+            await client.close()
+            return response.content or "[LLM returned empty content]"
+
+        logger.info(f"[LLM] Round {round_i+1}: {len(valid_tool_calls)} tool call(s)")
 
         # Add assistant message with tool calls
         api_messages.append(LLMMessage(
@@ -409,13 +418,13 @@ async def call_llm(
                 "id": tc["id"],
                 "type": "function",
                 "function": tc["function"],
-            } for tc in response.tool_calls],
+            } for tc in valid_tool_calls],
             reasoning_content=response.reasoning_content,
         ))
 
         full_reasoning_content = response.reasoning_content or ""
 
-        for tc in response.tool_calls:
+        for tc in valid_tool_calls:
             tool_error = await _process_tool_call(
                 tc=tc,
                 api_messages=api_messages,
@@ -496,7 +505,6 @@ async def call_llm_with_failover(
 
     # Check if we need to failover
     if not is_retryable_error(primary_result):
-        logger.warning(f"[Failover] Canceled: Primary model returned a non-retryable error: {primary_result[:150]}")
         return primary_result
 
     # Check guard conditions

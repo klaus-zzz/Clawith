@@ -602,7 +602,7 @@ class OpenAICompatibleClient(LLMClient):
             return await self._do_stream(url, payload, on_chunk, on_thinking)
         except LLMError as e:
             err_str = str(e).lower()
-            is_bad_request = "http 400" in err_str or "400" in err_str or "invalidrequesterror" in err_str
+            is_bad_request = "http 400" in err_str or "status code 400" in err_str or "invalid_request_error" in err_str or "invalidrequesterror" in err_str
             has_optional_keys = any(k in payload for k in self._OPTIONAL_STREAM_KEYS)
             if is_bad_request and has_optional_keys:
                 for key in self._OPTIONAL_STREAM_KEYS:
