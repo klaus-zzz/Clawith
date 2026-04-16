@@ -32,3 +32,4 @@ _agents/
 docs/
 .agents/rules/deploy.md
 k8s.yaml
+img/

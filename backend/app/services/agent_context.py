@@ -4,10 +4,13 @@ Loads soul, memory, skills summary, and relationships from the agent's
 workspace files and composes a comprehensive system prompt.
 """
 
+import logging
 import uuid
 from pathlib import Path
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -339,6 +342,7 @@ You have access to Atlassian tools via the Rovo MCP server. **Always call them v
             # Resolve agent's tenant_id
             _ag_r = await db.execute(sa_select(_AgentModel.tenant_id).where(_AgentModel.id == agent_id))
             _agent_tenant_id = _ag_r.scalar_one_or_none()
+            logger.info("[CompanyIntro] agent_id=%s, tenant_id=%s", agent_id, _agent_tenant_id)
 
             company_intro = ""
 
@@ -355,8 +359,11 @@ You have access to Atlassian tools via the Rovo MCP server. **Always call them v
                     ts = result.scalar_one_or_none()
                     if ts and ts.value and ts.value.get("content"):
                         company_intro = ts.value["content"].strip()
-                except Exception:
-                    pass
+                        logger.info("[CompanyIntro] Found in tenant_settings (priority 1), length=%d", len(company_intro))
+                    else:
+                        logger.info("[CompanyIntro] Not found in tenant_settings (priority 1)")
+                except Exception as e:
+                    logger.warning("[CompanyIntro] Priority 1 (tenant_settings) query failed: %s", e)
 
             # Priority 2: system_settings with tenant-scoped key (backward compat)
             if not company_intro and _agent_tenant_id:
@@ -367,6 +374,9 @@ You have access to Atlassian tools via the Rovo MCP server. **Always call them v
                 setting = result.scalar_one_or_none()
                 if setting and setting.value and setting.value.get("content"):
                     company_intro = setting.value["content"].strip()
+                    logger.info("[CompanyIntro] Found in system_settings key=%s (priority 2), length=%d", tenant_key, len(company_intro))
+                else:
+                    logger.info("[CompanyIntro] Not found in system_settings key=%s (priority 2)", tenant_key)
 
             # Priority 3: global system_settings fallback
             if not company_intro:
@@ -376,6 +386,9 @@ You have access to Atlassian tools via the Rovo MCP server. **Always call them v
                 setting = result.scalar_one_or_none()
                 if setting and setting.value and setting.value.get("content"):
                     company_intro = setting.value["content"].strip()
+                    logger.info("[CompanyIntro] Found in system_settings key=company_intro (priority 3), length=%d", len(company_intro))
+                else:
+                    logger.info("[CompanyIntro] Not found in any source")
 
             if company_intro:
                 static_parts.append(f"\n## Company Information\n{company_intro}")
@@ -391,10 +404,12 @@ You have access to Atlassian tools via the Rovo MCP server. **Always call them v
                     (_ei_dir / "company_profile.md").write_text(
                         f"# Company Profile\n\n{company_intro}\n", encoding="utf-8"
                     )
-                except Exception:
-                    pass
-    except Exception:
-        pass  # Don't break agent if DB is unavailable
+                except Exception as e:
+                    logger.warning("[CompanyIntro] Failed to sync company_profile.md: %s", e)
+            else:
+                logger.warning("[CompanyIntro] No company intro found for agent_id=%s — system prompt will NOT contain company info", agent_id)
+    except Exception as e:
+        logger.warning("[CompanyIntro] Top-level error loading company intro for agent_id=%s: %s", agent_id, e, exc_info=True)
 
     static_parts.append("""
 
