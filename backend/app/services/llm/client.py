@@ -482,19 +482,14 @@ class OpenAICompatibleClient(LLMClient):
             model=data.get("model"),
         )
 
-    async def stream(
+    async def _do_stream(
         self,
-        messages: list[LLMMessage],
-        tools: list[dict] | None = None,
-        temperature: float | None = None,
-        max_tokens: int | None = None,
-        on_chunk: ChunkCallback | None = None,
-        on_thinking: ThinkingCallback | None = None,
-        **kwargs: Any,
+        url: str,
+        payload: dict[str, Any],
+        on_chunk: ChunkCallback | None,
+        on_thinking: ThinkingCallback | None,
     ) -> LLMResponse:
-        """Streaming completion."""
-        url = f"{self._normalize_base_url()}/chat/completions"
-        payload = self._build_payload(messages, tools, temperature, max_tokens, stream=True, **kwargs)
+        """Execute the actual streaming request with connection retries."""
         full_content = ""
         full_reasoning = ""
         tool_calls_data: list[dict] = []
@@ -503,7 +498,7 @@ class OpenAICompatibleClient(LLMClient):
 
         in_think = False
         tag_buffer = ""
-        json_buffer = ""  # Buffer for non-standard APIs with split JSON (inspired by PR #120)
+        json_buffer = ""
 
         max_retries = 3
         client = await self._get_client()
@@ -585,6 +580,39 @@ class OpenAICompatibleClient(LLMClient):
             usage=final_usage,
             model=self.model,
         )
+
+    # Optional payload keys that some OpenAI-compatible proxies reject
+    _OPTIONAL_STREAM_KEYS = ("stream_options", "parallel_tool_calls")
+
+    async def stream(
+        self,
+        messages: list[LLMMessage],
+        tools: list[dict] | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        on_chunk: ChunkCallback | None = None,
+        on_thinking: ThinkingCallback | None = None,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Streaming completion with automatic fallback for incompatible APIs."""
+        url = f"{self._normalize_base_url()}/chat/completions"
+        payload = self._build_payload(messages, tools, temperature, max_tokens, stream=True, **kwargs)
+
+        try:
+            return await self._do_stream(url, payload, on_chunk, on_thinking)
+        except LLMError as e:
+            err_str = str(e).lower()
+            is_bad_request = "http 400" in err_str or "400" in err_str or "invalidrequesterror" in err_str
+            has_optional_keys = any(k in payload for k in self._OPTIONAL_STREAM_KEYS)
+            if is_bad_request and has_optional_keys:
+                for key in self._OPTIONAL_STREAM_KEYS:
+                    payload.pop(key, None)
+                logger.warning(
+                    f"[LLM] Stream got 400, retrying without {self._OPTIONAL_STREAM_KEYS} "
+                    f"(model={self.model}, url={url})"
+                )
+                return await self._do_stream(url, payload, on_chunk, on_thinking)
+            raise
 
     async def close(self) -> None:
         """Close the HTTP client."""
