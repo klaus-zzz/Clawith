@@ -463,7 +463,19 @@ async def call_llm(
                 and len(recent) >= 4
                 and all(c >= 2 for c in counts.values())
             )
-            if is_single_repeat or is_alternating:
+
+            # Detect: same tool NAME called too many times (even with different args)
+            # e.g. read_file called 6+ times total, or jina_search called 10+ times
+            tool_name_counts = Counter(
+                sig.split(":")[0] for sig in _tool_call_history
+            )
+            is_tool_overuse = any(
+                (name == "read_file" and c >= 6)
+                or (name != "read_file" and c >= 10)
+                for name, c in tool_name_counts.items()
+            )
+
+            if is_single_repeat or is_alternating or is_tool_overuse:
                 if _loop_warning_injected:
                     # Already warned but LLM keeps looping — force break
                     logger.warning(
@@ -473,14 +485,16 @@ async def call_llm(
                     break
                 _loop_warning_injected = True
                 logger.warning(
-                    "[LLM] Repetitive tool-call loop detected at round %d, "
-                    "injecting stop prompt", round_i + 1,
+                    "[LLM] Repetitive tool-call loop detected at round %d "
+                    "(single=%s alt=%s overuse=%s), injecting stop prompt",
+                    round_i + 1, is_single_repeat, is_alternating, is_tool_overuse,
                 )
                 api_messages.append(LLMMessage(
                     role="user",
                     content=(
-                        "🔴 检测到重复工具调用循环。你正在反复调用相同的工具和参数。"
-                        "请立即停止所有工具调用，基于你已经收集到的信息直接给出最终回答。"
+                        "🔴 检测到重复工具调用循环。你已经调用了大量工具但没有产出最终回答。"
+                        "请立即停止所有工具调用，基于你已经收集到的信息直接给出完整的最终回答。"
+                        "不要再调用任何工具，不要再说'让我搜集信息'，直接输出结论。"
                     ),
                 ))
 
