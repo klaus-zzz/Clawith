@@ -379,6 +379,20 @@ You have access to Atlassian tools via the Rovo MCP server. **Always call them v
 
             if company_intro:
                 static_parts.append(f"\n## Company Information\n{company_intro}")
+                # Sync company_intro to enterprise_info/company_profile.md so
+                # read_file("enterprise_info/company_profile.md") returns the same data
+                try:
+                    _data_dir = Path(settings.AGENT_DATA_DIR)
+                    if _agent_tenant_id:
+                        _ei_dir = _data_dir / f"enterprise_info_{_agent_tenant_id}"
+                    else:
+                        _ei_dir = _data_dir / "enterprise_info"
+                    _ei_dir.mkdir(parents=True, exist_ok=True)
+                    (_ei_dir / "company_profile.md").write_text(
+                        f"# Company Profile\n\n{company_intro}\n", encoding="utf-8"
+                    )
+                except Exception:
+                    pass
     except Exception:
         pass  # Don't break agent if DB is unavailable
 

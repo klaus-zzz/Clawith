@@ -124,6 +124,11 @@ class Settings(BaseSettings):
         "extra": "ignore",
     }
 
+    def get_agent_workspace_path(self, agent_id) -> "Path":
+        """Return the canonical persistent workspace path for an agent."""
+        from pathlib import Path
+        return Path(self.AGENT_DATA_DIR) / str(agent_id)
+
 
 @lru_cache
 def get_settings() -> Settings:
