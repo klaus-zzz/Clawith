@@ -340,6 +340,10 @@ async def call_llm(
     max_tokens = get_max_tokens(model.provider, model.model, getattr(model, 'max_output_tokens', None))
     _accumulated_tokens = 0
 
+    # Repetitive tool-call loop detection
+    _tool_call_history: list[str] = []
+    _loop_warning_injected = False
+
     # Tool-calling loop
     for round_i in range(_max_tool_rounds):
         # Dynamic tool-call limit warning
@@ -442,10 +446,44 @@ async def call_llm(
                     tool_call_id=tc.get("id", ""),
                 ))
 
+        # --- Repetitive tool-call loop detection ---
+        for tc in valid_tool_calls:
+            sig = f"{tc['function']['name']}:{tc['function'].get('arguments', '')}"
+            _tool_call_history.append(sig)
+
+        if len(_tool_call_history) >= 6:
+            from collections import Counter
+            recent = _tool_call_history[-6:]
+            counts = Counter(recent)
+            if any(c >= 3 for c in counts.values()):
+                if _loop_warning_injected:
+                    # Already warned but LLM keeps looping — force break
+                    logger.warning(
+                        "[LLM] Repetitive tool-call loop detected after warning, "
+                        "force-breaking at round %d", round_i + 1,
+                    )
+                    break
+                _loop_warning_injected = True
+                logger.warning(
+                    "[LLM] Repetitive tool-call loop detected at round %d, "
+                    "injecting stop prompt", round_i + 1,
+                )
+                api_messages.append(LLMMessage(
+                    role="user",
+                    content=(
+                        "🔴 检测到重复工具调用循环。你正在反复调用相同的工具和参数。"
+                        "请立即停止所有工具调用，基于你已经收集到的信息直接给出最终回答。"
+                    ),
+                ))
+
     # Record tokens even on "too many rounds" exit
     if agent_id and _accumulated_tokens > 0:
         await record_token_usage(agent_id, _accumulated_tokens)
     await client.close()
+
+    # If broken out due to loop detection, return last LLM content if available
+    if _loop_warning_injected and response and response.content:
+        return response.content
     return "[Error] Too many tool call rounds"
 
 
